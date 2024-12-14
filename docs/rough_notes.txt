@@ -1,0 +1,856 @@
+Kubernetes Study
+
+Saturday 14 Dec 2024
+
+KUBE-API SERVER:
+When we run any command, its authenticated the request and validated first.
+Eg: Creating a pod.
+1. Kubeapi server authenticated the request and validated.
+2. It creates pod object without assiging a node.
+3. Updates the information in etcd server and updates the user that pod has been created.
+4. Scheduler continuously monitor kube api server and realised there is new pod with no node assigned.
+5. Scheduler will find new node for the pod and communicates back to the kube api server.
+6. APi server updates the information in the etcd cluster.
+7. API server then passes that info to the kubelet of appropriate worker node.
+8. Kubetlet then creates a pod on the node and instruct the container runtime engine to deploy the app image
+9. Once done kubelet updates the status back to the kube api server
+10. The kube api server updates the data back to the etcd cluster.
+
+Silimar pattern follows for the most of the request. 
+
+
+Tasks: Download kube api server binary and run as a service in kubernetes master node.
+
+When we setup cluster using kubeadm tool, kube-apiserver deploy as a pod in kube-system namespace in master node.
+Manifests present in /etc/kubernetes/manifests/ folder.
+
+[root@master manifests]# cat kube-apiserver.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint: 192.168.0.10:6443
+  creationTimestamp: null
+  labels:
+    component: kube-apiserver
+    tier: control-plane
+  name: kube-apiserver
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - kube-apiserver
+    - --advertise-address=192.168.0.10
+    - --allow-privileged=true
+    - --authorization-mode=Node,RBAC
+    - --client-ca-file=/etc/kubernetes/pki/ca.crt
+    - --enable-admission-plugins=NodeRestriction
+    - --enable-bootstrap-token-auth=true
+    - --etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+    - --etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt
+    - --etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key
+    - --etcd-servers=https://127.0.0.1:2379
+    - --kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt
+    - --kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+    - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+    - --proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt
+    - --proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key
+    - --requestheader-allowed-names=front-proxy-client
+    - --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+    - --requestheader-extra-headers-prefix=X-Remote-Extra-
+    - --requestheader-group-headers=X-Remote-Group
+    - --requestheader-username-headers=X-Remote-User
+    - --secure-port=6443
+    - --service-account-issuer=https://kubernetes.default.svc.cluster.local
+    - --service-account-key-file=/etc/kubernetes/pki/sa.pub
+    - --service-account-signing-key-file=/etc/kubernetes/pki/sa.key
+    - --service-cluster-ip-range=10.96.0.0/12
+    - --tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+    - --tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+    image: registry.k8s.io/kube-apiserver:v1.29.3
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      failureThreshold: 8
+      httpGet:
+        host: 192.168.0.10
+        path: /livez
+        port: 6443
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    name: kube-apiserver
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        host: 192.168.0.10
+        path: /readyz
+        port: 6443
+        scheme: HTTPS
+      periodSeconds: 1
+      timeoutSeconds: 15
+    resources:
+      requests:
+        cpu: 250m
+    startupProbe:
+      failureThreshold: 24
+      httpGet:
+        host: 192.168.0.10
+        path: /livez
+        port: 6443
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    volumeMounts:
+    - mountPath: /etc/ssl/certs
+      name: ca-certs
+      readOnly: true
+    - mountPath: /etc/pki
+      name: etc-pki
+      readOnly: true
+    - mountPath: /etc/kubernetes/pki
+      name: k8s-certs
+      readOnly: true
+  hostNetwork: true
+  priority: 2000001000
+  priorityClassName: system-node-critical
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+  - hostPath:
+      path: /etc/ssl/certs
+      type: DirectoryOrCreate
+    name: ca-certs
+  - hostPath:
+      path: /etc/pki
+      type: DirectoryOrCreate
+    name: etc-pki
+  - hostPath:
+      path: /etc/kubernetes/pki
+      type: DirectoryOrCreate
+    name: k8s-certs
+status: {}
+[root@master manifests]#
+
+
+--
+
+[root@master manifests]# cat etcd.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kubeadm.kubernetes.io/etcd.advertise-client-urls: https://192.168.0.10:2379
+  creationTimestamp: null
+  labels:
+    component: etcd
+    tier: control-plane
+  name: etcd
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - etcd
+    - --advertise-client-urls=https://192.168.0.10:2379
+    - --cert-file=/etc/kubernetes/pki/etcd/server.crt
+    - --client-cert-auth=true
+    - --data-dir=/var/lib/etcd
+    - --experimental-initial-corrupt-check=true
+    - --experimental-watch-progress-notify-interval=5s
+    - --initial-advertise-peer-urls=https://192.168.0.10:2380
+    - --initial-cluster=master=https://192.168.0.10:2380
+    - --key-file=/etc/kubernetes/pki/etcd/server.key
+    - --listen-client-urls=https://127.0.0.1:2379,https://192.168.0.10:2379
+    - --listen-metrics-urls=http://127.0.0.1:2381
+    - --listen-peer-urls=https://192.168.0.10:2380
+    - --name=master
+    - --peer-cert-file=/etc/kubernetes/pki/etcd/peer.crt
+    - --peer-client-cert-auth=true
+    - --peer-key-file=/etc/kubernetes/pki/etcd/peer.key
+    - --peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+    - --snapshot-count=10000
+    - --trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+    image: registry.k8s.io/etcd:3.5.12-0
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      failureThreshold: 8
+      httpGet:
+        host: 127.0.0.1
+        path: /health?exclude=NOSPACE&serializable=true
+        port: 2381
+        scheme: HTTP
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    name: etcd
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+    startupProbe:
+      failureThreshold: 24
+      httpGet:
+        host: 127.0.0.1
+        path: /health?serializable=false
+        port: 2381
+        scheme: HTTP
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    volumeMounts:
+    - mountPath: /var/lib/etcd
+      name: etcd-data
+    - mountPath: /etc/kubernetes/pki/etcd
+      name: etcd-certs
+  hostNetwork: true
+  priority: 2000001000
+  priorityClassName: system-node-critical
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/pki/etcd
+      type: DirectoryOrCreate
+    name: etcd-certs
+  - hostPath:
+      path: /var/lib/etcd
+      type: DirectoryOrCreate
+    name: etcd-data
+status: {}
+[root@master manifests]#
+
+--
+
+
+
+
+In non kubeadm installation we can inspect the kubeapi server using inspecting service:
+cat /etc/systemd/system/kube-apiserver.service
+
+We can also confirm whether apiserver is running or not using:
+ps -ef | grep kube-apiserver
+
+[root@master manifests]# ps -ef | grep kube-apiserver
+root        1493       1  0 05:15 ?        00:00:00 /usr/bin/conmon -b /run/containers/storage/overlay-containers/0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0/userdata -c 0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0 --exit-dir /var/run/crio/exits -l /var/log/pods/kube-system_kube-apiserver-master_cb810db0f8d019db342aabd393495217/kube-apiserver/4.log --log-level info -n k8s_kube-apiserver_kube-apiserver-master_kube-system_cb810db0f8d019db342aabd393495217_4 -P /run/containers/storage/overlay-containers/0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0/userdata/conmon-pidfile -p /run/containers/storage/overlay-containers/0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0/userdata/pidfile --persist-dir /var/lib/containers/storage/overlay-containers/0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0/userdata -r /usr/bin/runc --runtime-arg --root=/run/runc --socket-dir-path /var/run/crio --syslog -u 0344b1bb1448eac235572ffac1f9eec8360f6ff417b9fdcc1df095d7312195f0 -s
+root        1522    1493  2 05:15 ?        00:08:15 kube-apiserver --advertise-address=192.168.0.10 --allow-privileged=true --authorization-mode=Node,RBAC --client-ca-file=/etc/kubernetes/pki/ca.crt --enable-admission-plugins=NodeRestriction --enable-bootstrap-token-auth=true --etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt --etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt --etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key --etcd-servers=https://127.0.0.1:2379 --kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt --kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname --proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt --proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key --requestheader-allowed-names=front-proxy-client --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=6443 --service-account-issuer=https://kubernetes.default.svc.cluster.local --service-account-key-file=/etc/kubernetes/pki/sa.pub --service-account-signing-key-file=/etc/kubernetes/pki/sa.key --service-cluster-ip-range=10.96.0.0/12 --tls-cert-file=/etc/kubernetes/pki/apiserver.crt --tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+root       66254   61617  0 09:53 pts/0    00:00:00 grep --color=auto kube-apiserver
+
+===================================
+
+KUBE-CONTROLLER MANAGER:
+Controllers are processes which are conitnuously monitoring state of cluster and works towards bringing the whole system at desired functioning state.
+For eg node controller monitors the node with the help of kubeapi server. Node controller check the status of the nodes every 5sec (Node Monitor period). 
+If it does not received response from the node continuosluy in 40 sec (Node Monitor grace period) so it marks node as a unreachable.
+After unreachable it gives chance to node for 5min (Pod eviction timeout) to come back up. If it does not it removes the pods assign to that node and provisions them in healthy one if the pod are part of replicaset.
+
+Replication Controller:
+Responsible for monitoring status of replicaset and insuring that desired number of pods always available within the set. 
+If pod dies it creates another one.
+It is good for high availability.
+Can we have replication controller for single pod?
+Ans: Yes it is good idea to have it, so when pod dies it will automatically creates new one.
+
+Replication controller span across multiple nodes in the cluster.
+
+Difference between Replication controller vs Replica Set.
+=> Both have same purpose.
+  Replication controller is the older technology which replace by Replica Set.
+  Replicaset requires a selector definition, it will tell replicaset what pods fall under it. This is major difference.
+  Why it need to know the pods falls under it?
+  => Because Replicaset also manages pod that were not created as part of Replica Set creation.
+     For eg: If there are pods which are created before replicaset that match labels specified in the selector, 
+	          the replicaset will also take these pods into consideration when creating the replicas.
+   
+ 
+How to scale replicaset?
+Ans: Many ways - 
+	kubectl replace -f replicaset.yaml
+	kubectl scale --replicas=6 -f replicaset.yaml   (It will not update the file)
+	kubectl scale --replicas=6 replicaset myapp-replicaset
+
+We can also automatically scale replicas based on nodes.
+
+
+Suppose I have mentioned incorrect image in replicaset definition file and mycurrent pod is in ImageErrPull state.
+And i update image name in manifest file and apply changes using command - 
+ # kubectl replace -f new-replicaset.yaml 
+But still pods showing imageerrpull issue, to resolve this we need first delete all issues pods, so that replicaset
+will create new pod with new images.
+
+In replicaset: Selector labels and pod template labels should always match, otherwise you will get an error.
+
+
+Some more controllers example:
+1. Node Controller
+2. Replication controller
+3. Deployment CONTROLLER
+4. Namespace controller 
+5. Endpoint controller 
+6. Service Account Controller 
+7. Job Controller 
+8. PV protection controller 
+9. PV binder controller 
+10. Cronjob 
+11. Stateful Set 
+12. Replicaset 
+
+How to see all these controllers and where they are located?
+=> All of them packages into kube-controller-manager 	
+
+
+
+Task: Install kube-controller-manager binary and install as a service.
+
+If we setup cluster using kubeadm, it runs as a pod in kube-system namespace and manifests present in - 
+/etc/kubernetes/manifests/
+
+
+[root@master manifests]# cat kube-controller-manager.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    component: kube-controller-manager
+    tier: control-plane
+  name: kube-controller-manager
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - kube-controller-manager
+    - --allocate-node-cidrs=true
+    - --authentication-kubeconfig=/etc/kubernetes/controller-manager.conf
+    - --authorization-kubeconfig=/etc/kubernetes/controller-manager.conf
+    - --bind-address=127.0.0.1
+    - --client-ca-file=/etc/kubernetes/pki/ca.crt
+    - --cluster-cidr=10.244.0.0/16
+    - --cluster-name=kubernetes
+    - --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
+    - --cluster-signing-key-file=/etc/kubernetes/pki/ca.key
+    - --controllers=*,bootstrapsigner,tokencleaner
+    - --kubeconfig=/etc/kubernetes/controller-manager.conf
+    - --leader-elect=true
+    - --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+    - --root-ca-file=/etc/kubernetes/pki/ca.crt
+    - --service-account-private-key-file=/etc/kubernetes/pki/sa.key
+    - --service-cluster-ip-range=10.96.0.0/12
+    - --use-service-account-credentials=true
+    image: registry.k8s.io/kube-controller-manager:v1.29.3
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      failureThreshold: 8
+      httpGet:
+        host: 127.0.0.1
+        path: /healthz
+        port: 10257
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    name: kube-controller-manager
+    resources:
+      requests:
+        cpu: 200m
+    startupProbe:
+      failureThreshold: 24
+      httpGet:
+        host: 127.0.0.1
+        path: /healthz
+        port: 10257
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    volumeMounts:
+    - mountPath: /etc/ssl/certs
+      name: ca-certs
+      readOnly: true
+    - mountPath: /etc/pki
+      name: etc-pki
+      readOnly: true
+    - mountPath: /usr/libexec/kubernetes/kubelet-plugins/volume/exec
+      name: flexvolume-dir
+    - mountPath: /etc/kubernetes/pki
+      name: k8s-certs
+      readOnly: true
+    - mountPath: /etc/kubernetes/controller-manager.conf
+      name: kubeconfig
+      readOnly: true
+  hostNetwork: true
+  priority: 2000001000
+  priorityClassName: system-node-critical
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+  - hostPath:
+      path: /etc/ssl/certs
+      type: DirectoryOrCreate
+    name: ca-certs
+  - hostPath:
+      path: /etc/pki
+      type: DirectoryOrCreate
+    name: etc-pki
+  - hostPath:
+      path: /usr/libexec/kubernetes/kubelet-plugins/volume/exec
+      type: DirectoryOrCreate
+    name: flexvolume-dir
+  - hostPath:
+      path: /etc/kubernetes/pki
+      type: DirectoryOrCreate
+    name: k8s-certs
+  - hostPath:
+      path: /etc/kubernetes/controller-manager.conf
+      type: FileOrCreate
+    name: kubeconfig
+status: {}
+[root@master manifests]#
+
+----
+
+If you are running as a service then check - 
+cat /etc/systemd/system/kube-controller-manager.service
+
+ps -ef | grep kube-controller-manager
+
+[root@master manifests]# ps -ef | grep kube-controller-manager
+root        1492       1  0 05:15 ?        00:00:00 /usr/bin/conmon -b /run/containers/storage/overlay-containers/3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e/userdata -c 3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e --exit-dir /var/run/crio/exits -l /var/log/pods/kube-system_kube-controller-manager-master_6a327d6e651ba50513a24327502fb289kube-controller-manager/5.log --log-level info -n k8s_kube-controller-manager_kube-controller-manager-master_kube-system_6a327d6e651ba50513a24327502fb289_5 -P /run/containers/storage/overlay-containers/3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e/userdata/conmon-pidfile -p /run/containers/storage/overlay-containers/3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e/userdata/pidfile --persist-dir /var/lib/containers/storage/overlay-containers/3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e/userdata -r /usr/bin/runc --runtime-arg --root=/run/runc --socket-dir-path /var/run/crio --syslog -u 3d3c3e7610e533e3f0a01542e3be74d68013813cce3fd5956ee4a57942b9747e -s
+root        1528    1492  0 05:15 ?        00:02:07 kube-controller-manager --allocate-node-cidrs=true --authentication-kubeconfig=/etc/kubernetes/controller-manager.conf --authorization-kubeconfig=/etc/kubernetes/controller-manager.conf --bind-address=127.0.0.1 --client-ca-file=/etc/kubernetes/pki/ca.crt --cluster-cidr=10.244.0.0/16 --cluster-name=kubernetes --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt --cluster-signing-key-file=/etc/kubernetes/pki/ca.key --controllers=*,bootstrapsigner,tokencleaner --kubeconfig=/etc/kubernetes/controller-manager.conf --leader-elect=true --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt --root-ca-file=/etc/kubernetes/pki/ca.crt --service-account-private-key-file=/etc/kubernetes/pki/sa.key --service-cluster-ip-range=10.96.0.0/12 --use-service-account-credentials=true
+root       69802   61617  0 10:09 pts/0    00:00:00 grep --color=auto kube-controller-manager
+[root@master manifests]#
+
+============================
+
+KUBE-SCHEDULER 
+kube-scheduler only decides which pod goes on which node.
+It does not actually place the pod on the node, that is job of kubelet. Kubelet creates the pod in the node.
+
+Scheduler finds best node for pod based on its requirement.
+For eg: Pod requirement is 10 CPU 
+1. kube-scheudler filter out the nodes (not sufficient cpu) which do not fit in the requirement.
+2. Lets say it filter two nodes and two are reamining. Then scheduler rank the nodes for best fit for the pod.
+   It uses priority function to assign a score to node on scale 0 to 10.
+   Eg: Scheduler calculates the amount of resources that would be free on the nodes after placing the pod on them and that node get the better rank and it wins.
+3. It also checks for resource requirements and limits, taints and tolerations, node selectors/affinity.
+
+Scheduler can be customize and we can write our own scheduler as well.
+
+Taks: Donwload kube-scheduler binary and run as a service.
+
+If we install using kubeadm tool, then it run as a pod in kube-system namespace.
+
+
+
+[root@master manifests]# cat kube-scheduler.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    component: kube-scheduler
+    tier: control-plane
+  name: kube-scheduler
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - kube-scheduler
+    - --authentication-kubeconfig=/etc/kubernetes/scheduler.conf
+    - --authorization-kubeconfig=/etc/kubernetes/scheduler.conf
+    - --bind-address=127.0.0.1
+    - --kubeconfig=/etc/kubernetes/scheduler.conf
+    - --leader-elect=true
+    image: registry.k8s.io/kube-scheduler:v1.29.3
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      failureThreshold: 8
+      httpGet:
+        host: 127.0.0.1
+        path: /healthz
+        port: 10259
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    name: kube-scheduler
+    resources:
+      requests:
+        cpu: 100m
+    startupProbe:
+      failureThreshold: 24
+      httpGet:
+        host: 127.0.0.1
+        path: /healthz
+        port: 10259
+        scheme: HTTPS
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 15
+    volumeMounts:
+    - mountPath: /etc/kubernetes/scheduler.conf
+      name: kubeconfig
+      readOnly: true
+  hostNetwork: true
+  priority: 2000001000
+  priorityClassName: system-node-critical
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/scheduler.conf
+      type: FileOrCreate
+    name: kubeconfig
+status: {}
+[root@master manifests]#
+
+--
+
+ps -ef | grep kube-scheduler
+[root@master manifests]# ps -ef | grep kube-scheduler
+root        1497       1  0 05:15 ?        00:00:00 /usr/bin/conmon -b /run/containers/storage/overlay-containers/2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6/userdata -c 2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6 --exit-dir /var/run/crio/exits -l /var/log/pods/kube-system_kube-scheduler-master_ef28d874ec37e9e2f263d690fdf1b1dd/kube-scheduler/5.log --log-level info -n k8s_kube-scheduler_kube-scheduler-master_kube-system_ef28d874ec37e9e2f263d690fdf1b1dd_5 -P /run/containers/storage/overlay-containers/2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6/userdata/conmon-pidfile -p /run/containers/storage/overlay-containers/2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6/userdata/pidfile --persist-dir /var/lib/containers/storage/overlay-containers/2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6/userdata -r /usr/bin/runc --runtime-arg --root=/run/runc --socket-dir-path /var/run/crio --syslog -u 2eaef62d9be8833ca5a14a0c6ee1cdc2e47fa9d6b7842569251d5b26df0c3ff6 -s
+root        1542    1497  0 05:15 ?        00:00:32 kube-scheduler --authentication-kubeconfig=/etc/kubernetes/scheduler.conf --authorization-kubeconfig=/etc/kubernetes/scheduler.conf --bind-address=127.0.0.1 --kubeconfig=/etc/kubernetes/scheduler.conf --leader-elect=true
+root       72187   61617  0 10:20 pts/0    00:00:00 grep --color=auto kube-scheduler
+
+==========================================
+
+KUBELET:
+It registers a node with kubernetes cluster.
+When it recives the instruction to run pod on the node, it requests the container runtime engine to pull required image and run an instance.
+The kubelet continues to monitor state of the pod and its containers and reports to the kubeapi server on timely basis.
+
+If we use kubeadm tool to deploy cluster, it does not automatically deploy the kubelets.
+
+You must always manually install the kubelet on worker node.
+Download and extract and run it as a service.
+
+ps -ef | grep kubelet
+
+[root@master manifests]# ps -ef | grep kubelet
+root        1277       1  1 05:15 ?        00:04:27 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --container-runtime-endpoint=unix:///var/run/crio/crio.sock --pod-infra-container-image=registry.k8s.io/pause:3.9
+root        1522    1493  2 05:15 ?        00:09:07 kube-apiserver --advertise-address=192.168.0.10 --allow-privileged=true --authorization-mode=Node,RBAC --client-ca-file=/etc/kubernetes/pki/ca.crt --enable-admission-plugins=NodeRestriction --enable-bootstrap-token-auth=true --etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt --etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt --etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key --etcd-servers=https://127.0.0.1:2379 --kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt --kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname --proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt --proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key --requestheader-allowed-names=front-proxy-client --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=6443 --service-account-issuer=https://kubernetes.default.svc.cluster.local --service-account-key-file=/etc/kubernetes/pki/sa.pub --service-account-signing-key-file=/etc/kubernetes/pki/sa.key --service-cluster-ip-range=10.96.0.0/12 --tls-cert-file=/etc/kubernetes/pki/apiserver.crt --tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+root        3609    3599  0 05:15 ?        00:00:00 /usr/local/bin/node-driver-registrar --v=5 --csi-address=/csi/csi.sock --kubelet-registration-path=/var/lib/kubelet/plugins/csi.tigera.io/csi.sock
+root       73880   61617  0 10:27 pts/0    00:00:00 grep --color=auto kubelet
+
+==========================================
+
+KUBE-PROXY:
+
+By default pod can communiacted with another pod in the cluster using pod network. There are multiple pod networking solutions available - calico, etc.
+
+Service is virtual component which is in kubernetes memory.
+How service is accessible in the cluster across the node?
+=> using kube-proxy 
+   Kube-proxy is a process which runs on cluster nodes and its job is to look for new services, and everytime when service is created, kube-proxy creates 
+    a appropriate rule on each node to forward traffic to those services to the backend pods.
+	One way it does this using iptables rules.
+	
+Taks: Download kube-proxy binary, extract it and run it as a service.
+
+Kubeadm tool run kube-proxy as a pod on each node by running it as a daemonset so single pod alwasys deployed in a cluster.
+
+kubectl get daemonset -n kube-system 
+
+==========================================
+
+When to use multi-container pod?
+Ans: If you need some helper container with our app/web container for processing user data, files, etc. 
+You can have multi-containers in a pod.So when app container dies, helper also dies and when app container deploy, helper also deploy.
+In multi-container pod, all containers can reach out to each other using localhost as they shared same network space.
+Also they can easily share same storage space as well.
+==========================================
+
+
+Pod definition files: 
+Always contains -
+	apiVersion:
+	kind:
+	metadata:
+
+	spec:
+
+
+apiVersion - API Version of object we are trying to create
+  Pod - v1
+  Service - v1
+  ReplicaSet - apps/v1
+  Deployment- apps/v1 
+  
+kind - Type of object we are trying to create  
+
+metadata - Data about the object like its name, labels, etc and it is in the form of dictionary
+
+   name: - string value 
+   labels  - dictionary inside the metadata dictionary which has key value pairs
+       app: myapp
+
+ 
+spec - It is a dictionary 
+  containers:     - list/array
+     - name: nginx-controller    (1st item of the disk)
+	   image: nginx 
+     
+
+kubectl create -f pod-definition.yml 
+
+
+
+--
+# kubectl get pods
+Status can be - Running, ImagePullBackOff
+
+Ready column indicates - Number of containers running/ Total number of containers
+
+controlplane ~ ✖ kubectl apply -f redis.yml 
+Warning: resource pods/redis is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.
+pod/redis configured
+
+----
+
+--dry-run is deprecated so replace it with --dry-run=client 
+
+Use dry-run to generate yaml file - 
+# kubectl run redis --image=redis --dry-run=client -o yaml > redis.yml  
+
+-----
+
+
+Tip: If you are unsure about the apiVersion always run command - # kubectl explain replicaset ,
+       here group: apps and version: v1 so final apiVersion would be apps/v1
+	   
+
+-==================================
+
+DEPLOYMENTS:
+
+Rolling updates: When you have multiple pods of application running and you wanted to do upgrade, then rolling uppdate do one by one.
+
+
+Deployment advantages:
+1. Rolling updates
+2. Easy rollback changes
+3. 
+
+
+Deployment provides capabilities to upgrade underline instances seamlessly using rolling updates, undo changes and pause and resume changes as requireed.
+
+Deployment definition exactly same as replicaset definition except kind now as 'Deployment'.
+
+Deployment automatically creates replicaset.
+
+Deployments --creates--> Replicaset --creates--> Pods
+
+-----------
+
+kuebctl get all -- shows pods, services, replicaset, deployments
+
+
+Refer for commands:
+https://kubernetes.io/docs/reference/kubectl/conventions/
+
+==========================
+
+SERVICES:
+1. NodePort
+2. ClusterIP
+3. LoadBalancer
+
+Nodeport --> When we want to access application/website from external, we can use nodeport service.
+			 Service will map port on the node to a port on the pod
+			 There are 3 ports invole - port of pod (target port) where actual webservice running for eg: 80 
+										port of the service (port) eg: 80
+										port of the node (nodeport) which we use to access app externally. eg: 30008
+			 Service itself has its own IP address, that is called cluster IP of the service.	
+			 Nodeport can only be in valid range which by default of 30000 - 32767.
+			 Mandatary field is - port (port of the service), if we do not provide target port by default it assume port's port and 
+									if we do not provide nodePort then it takes free port from valid 30000-32767 range
+			 ports is an array (-), we can add multiple port mapping in single service.
+
+			 Service act as a built in load balancer to disribute the load and It uses random algorithm to balance traffic between the pod and session affinity is set to yes.
+			 
+			 Service spans across the nodes. So even if particular does not have pod running but in future it comes, you don't need to do any additional thing, service will take care of that pod if it has required labels.
+			 Even your pod is deployed on two nodes it will still accessible through the IP of all the nodes of the cluster.
+How to connect the service to the pod?
+Ans: Using selectors and labels (no need to add matchLabels keyword here, we can directly use labels).
+
+
+ClusterIP --> 
+   It groups the pods and provide single endpoint to reach out to the pods. So even pods are recreated and its IP changes, frontend pod can reqach out to backend pods without an issue.
+   
+   
+LoadBalancer --> For load balancer service - Create deployments, create clusterIp service and then create LoadBalancer service.
+				NodePort is useful to access application externally, but what URL you can provide to the end user.
+				As Nodeport is not practical approach.
+				For on-prem we need to deploy one VM with laod balancer like HA-Proxy or nginx and loadbalancer on the node but this is tedious task.
+				It is easy if we use cloud like GCP, AWS, etc.
+
+
+When I describe service I see the endpoints what are these? What happened if we accidently assign same labels to any different pod which service created doesn't service route traffic to that pod as well?
+Ans: Here endpoints comes into picture, so when we create service we are thinking as we are giving slectors and labels service routes traffic to the pod on the basis of labels.
+     But it is not like that, when we create service based on labels service identifies pod and its IP address and port mark as endpoints.
+     Hence you can see same number of endpoints which pod matches while creation of the service.
+     So even if you accidently creates new pod with same label, service will not route traffic there.
+
+When you creates service and bymistake given wrong label and your service is not routing traffic so always use #kubectl describe svc command and check for if any endpoints map or not, if it is zero (0), then check for labels, it is best way to troubleshoot this issue.
+
+Create a Service named redis-service of type ClusterIP to expose pod redis on port 6379
+
+kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o yaml
+	 (This will automatically use the pod's labels as selectors)
+
+Or
+
+kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml 
+(This will not use the pods labels as selectors, instead it will assume selectors as app=redis. You cannot pass in selectors as an option. So it does not work very well if your pod has a different label set. So generate the file and modify the selectors before creating the service)
+
+
+
+==========================
+
+NAMESPACES:
+   Namespace is a isolated environment for kubernetes objects.
+   By default kubernetes creates 'default' namespace for us.
+   Kubernetes creates set of pods and services for its internal purpose in kube-system namespace. It creates in different namespace to save resources by accidently deletion from the user.
+   Kuebrnetes creates 3rd namespace automatically 'kube-public'. Here resources which should be available to all users are created.
+   We can create custom namespaces using # kubectl create ns command for different applications as per our need to isolcate from other application.
+   Each namespace has its own set of policies that defines who can do what.
+   We can also assign quota to each of these name spaces, in that way each namespace is guaranteed a certain amount and does not use more than its limit.
+   The resources in each namespaces can refer their resources simply by their names.
+      eg: mysql.connect("db-service") 
+   If pod of one namespace wants to access pod of another namespace, we need to provide namespace name as well.
+      syntax - servicename.namespace.svc.cluster.local  we need to add this because when the service is created, a DNS entry add in this format.
+	      cluster.local --> Is a default domain of the kubernetes cluster 
+		  svc --> subdomain for service
+      eg: mysql.connect("db-service.dev.svc.cluster.local") where dev is the namespace name.
+   In the definition yaml files we can add namespace in the metadata section metadata.namespace
+   
+   Que. How to switch dev namespace permanently, so we dont want to specify namespace option with command?
+   Ans: kubectl config set-context $(kubectl config current-context) --namespace=dev
+   
+Resource Quota:
+    We can restrict the namespace, so that it does not consume all resources of the cluster.
+	We can check whether quota exceededs of particular namespace or not using -
+		# kubectl get resourcequota -n dev
+		# kubectl describe ns dev
+
+==========================
+
+IMPERATIVE VS DECLARATIVE APPROACH
+
+Imperative Approach - Step by step detailed instrucion 
+
+Declarative - Just add requirements 
+              Eg: Terraform, Puppet, Chef, Ansible
+			  
+In kubernetes world, imperative approach is managing objects using commands to create, update and delete objects.
+                     This approach is quick as we do not need to play with yaml files.
+					 It is hard to keep track of how these objects are created.
+					 Better way is update the configuration in yaml file and use # kubectl replace -f nginx.yaml command to apply changes.
+                     To completely delete and deploy object again use # kubectl replace --force -f nginx.yaml command. This is still imperative appraoch because you are still using replace and delete commands.
+					 You should aware that object is exist before you replace that.
+					 Create comamnd will fail if object is already exist.
+					 As a system administartor imperative approach is very taxing as you must always be aware of current configurations and perform checks to make sure things are in place before making the change.
+					 
+Declarative approach is create set of files with instruction and run single kubectl apply command to deploy resources.
+      # kubectl apply -f nginx.yaml => It look for the existing configuration and figure out what changes needs to be done to the system.
+	   kubectl apply command (instead of create and replace command) is intelligent enough to create an object if it doesn't already exist.
+	   
+      If there are multiple files of objects in a directory, so you can specify path of directory, so all the objects are created at once.
+	  # kubectl apply -f /path/to/config-files
+
+
+Tips for exam: Use imperative commands to save time as much as possible for simple tasks.
+
+https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
+
+Create an NGINX Pod
+
+kubectl run nginx --image=nginx
+
+
+
+Generate POD Manifest YAML file (-o yaml). Don't create it(--dry-run)
+
+kubectl run nginx --image=nginx --dry-run=client -o yaml
+
+
+
+Deployment
+Create a deployment
+
+kubectl create deployment --image=nginx nginx
+
+
+
+Generate Deployment YAML file (-o yaml). Don't create it(--dry-run)
+
+kubectl create deployment --image=nginx nginx --dry-run=client -o yaml
+
+
+
+Generate Deployment with 4 Replicas
+
+kubectl create deployment nginx --image=nginx --replicas=4
+
+
+
+You can also scale a deployment using the kubectl scale command.
+
+kubectl scale deployment nginx --replicas=4
+
+Another way to do this is to save the YAML definition to a file and modify
+
+kubectl create deployment nginx --image=nginx --dry-run=client -o yaml > nginx-deployment.yaml
+
+
+
+You can then update the YAML file with the replicas or any other field before creating the deployment.
+
+
+
+Service
+Create a Service named redis-service of type ClusterIP to expose pod redis on port 6379
+
+kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o yaml
+
+(This will automatically use the pod's labels as selectors)
+
+Or
+
+kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml (This will not use the pods labels as selectors, instead it will assume selectors as app=redis. You cannot pass in selectors as an option. So it does not work very well if your pod has a different label set. So generate the file and modify the selectors before creating the service)
+
+
+
+Create a Service named nginx of type NodePort to expose pod nginx's port 80 on port 30080 on the nodes:
+
+kubectl expose pod nginx --type=NodePort --port=80 --name=nginx-service --dry-run=client -o yaml
+
+(This will automatically use the pod's labels as selectors, but you cannot specify the node port. You have to generate a definition file and then add the node port in manually before creating the service with the pod.)
+
+Or
+
+kubectl create service nodeport nginx --tcp=80:80 --node-port=30080 --dry-run=client -o yaml
+
+(This will not use the pods labels as selectors)
+
+Both the above commands have their own challenges. While one of it cannot accept a selector the other cannot accept a node port. I would recommend going with the kubectl expose command. If you need to specify a node port, generate a definition file using the same command and manually input the nodeport before creating the service.
+
+
+======================
+
+KUBECTL APPLY COMMAND:
+ It consist 3 things - local yaml file, Live object configurations, and Last applied configurations (json format).
+  Last applied configuration is present in live object configurations only in the section - 
+	metadata:
+		annotations:
+			kubectl.kubernetes.io/last-applied-configuration:       
+  When we run kubectl apply command, apply command compares local file, live object configuration and last applied configuration stored within the live object configurations file for deciding what changes are to be made.
+   kubectl create and replace command do not store last applied configuration like this, so please do not mixup imperative and declarative approach.
+
+=======================
+
+
