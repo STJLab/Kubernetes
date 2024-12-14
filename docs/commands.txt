@@ -1,0 +1,45 @@
+kubectl run nginx --image=nginx
+kuebctl get pods
+kubectl get pods -o wide
+kubectl create -f pod-nginx.yml
+kubectl describe pod nginx-pod
+kubectl apply -f 2-multi-container-pod.yaml (For creating new object create and apply works same)
+kubectl get replicationcontroller
+kubectl get rc
+kubectl get repliaset
+kubectl get rs 
+kubectl replace -f replicaset.yaml (To update or replace replicaset)
+kubectl scale --replicas=6 -f replicaset.yaml
+kubectl scale --replicas=6 replicaset myapp-replicaset
+kubectl delete replicaset myapp-replicaset (Also deletes all underlying pods)
+kubectl edit replicaset new-replica-set
+kubectl explain replicaset
+kubectl get all
+kubectl create deployment --image=httpd:2.4-alpine httpd-frontend --replicas=3
+kubectl create deployment --image=httpd:2.4-alpine httpd-frontend --replicas=3 --dry-run=client -o yaml
+kubectl create deployment --image=httpd:2.4-alpine httpd-frontend --replicas=3 --dry-run=client -o yaml > deployment.yaml
+kubectl create deploy --help
+kubectl get svc
+kubectl describe svc myapp-service
+kubectl explain service
+kubectl get pods --namespace=kube-system
+kubectl get pods -n kube-system
+kubectl create ns dev
+kubectl run nginx --image=nginx -n dev
+kubectl explain namespace 
+kubectl config set-context $(kubectl config current-context) --namespace=dev
+kuebctl get pods --all-namespaces
+kuebctl get pods -A
+kubectl describe ns dev
+kubectl get resourcequota -n dev
+kubectl expose deployment nginx --port 80
+kubectl edit deployment nginx
+kubectl set image deployment nginx nginx=nginx:1.18
+kubectl delete -f nginx.yaml
+kubectl replace --force -f nginx.yaml
+kubectl apply -f /path/to/config-files (directory where all object files present and you want to create at once)
+kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o yaml
+kubectl expose pod redis --name=redis-service --port=6379
+kubectl run custom-nginx --image=nginx --port=8080
+kubectl run httpd --image=httpd:alpine --port=80 --expose=true (Create pod and service at the same time)
+
