@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+    name: nginx-pod-nodeslector
+spec:
+    containers:
+    - name: nginx-container
+      image: nginx
+    nodeSelector:
+      size: Large
+
+#Above example assuming we have provided label to the node.
+# kuebctl label nodes node1 size=Large 
+

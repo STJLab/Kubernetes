@@ -47,3 +47,19 @@ kubectl get pod --selector env=prod,bu=finance,tier=frontend
 kubectl get pods --selector app=App1 --no-headers
 kubectl get pods --selector app=App1 --no-headers | wc -l
 kubectl get all --selector app=App1 --no-headers | wc -l
+kubectl taint node node1 app=blue:NoSchedule
+kubectl describe node master | grep Taint
+kubectl describe node controlplane | grep -i taint
+kubectl taint nodes controlplane node-role.kubernetes.io/control-plane:NoSchedule-
+kubectl label node node01 color=blue
+kubectl create deploy blue --image=nginx --replicas=3
+kuebctl get limitranges
+kubectl describe limitranges cpu-memory-resource-constraint
+kubectl explain resourcequota
+kubectl get resourcequota (this command will show how much is already used and how much is free)
+kubectl describe resourcequota my-resource-quota
+kubectl get daemonset
+kubectl get ds 
+kubectl describe daemonset nginx-daemonset
+kubectl run static-busybox --image=busybox --dry-run=client -o yaml --command -- sleep 1000 (Do not add other options after command --, otherwise that will also recognized as a command)
+kubectl run static-busybox --image=busybox --dry-run=client -o yaml --command -- sleep 1000 > busybox.yaml
