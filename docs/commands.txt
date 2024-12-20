@@ -63,3 +63,18 @@ kubectl get ds
 kubectl describe daemonset nginx-daemonset
 kubectl run static-busybox --image=busybox --dry-run=client -o yaml --command -- sleep 1000 (Do not add other options after command --, otherwise that will also recognized as a command)
 kubectl run static-busybox --image=busybox --dry-run=client -o yaml --command -- sleep 1000 > busybox.yaml
+kubectl config current-context (Check on which cluster you are currently logged-in)
+kubectl get events -o wide (List all the events in current namespace)
+kubectl get clusterrolebinding my-scheduler-as-kube-scheduler my-scheduler-as-volume-scheduler -n kube-system
+kubectl get sa my-scheduler -n kube-system
+kubectl get configmap -n kube-system
+kubectl describe configmap my-scheduler-config -n kube-system
+kubectl create configmap my-scheduler-config --from-file=/root/my-scheduler-config.yaml -n kube-system
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl delete -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl top node (CPU and Memory consumption of each node)
+kubectl top pod (CPU and Memory consumption of each pod)
+kubectl logs nginx-pod
+kubectl logs -f nginx-pod (Stream live logs)
+kubectl logs -f nginx-pod nginx-container
+
