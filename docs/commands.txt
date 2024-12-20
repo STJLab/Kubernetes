@@ -77,4 +77,9 @@ kubectl top pod (CPU and Memory consumption of each pod)
 kubectl logs nginx-pod
 kubectl logs -f nginx-pod (Stream live logs)
 kubectl logs -f nginx-pod nginx-container
-
+kubectl rollout status deployment/myapp-deployment
+kubectl rollout history deployment/myapp-deployment
+kuebctl rollout undo deployment/myapp-deployment
+kubectl set image deployment/myapp-deployment nginx-container=nginx:1.9.1
+kubectl run webapp-green --image=kodecloud/webapp-green -- --color=green
+kubectl run webapp-green --image=kodecloud/webapp-green --command -- python app2.py --color=green

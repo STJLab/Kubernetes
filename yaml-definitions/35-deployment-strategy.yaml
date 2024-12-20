@@ -1,0 +1,28 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: nginx-deploy-strategy
+    labels:
+      app: web
+      tier: tier-1
+spec:
+    template:
+      metdata:
+          name: nginx-pod
+          labels:
+            tier: tier-1
+      spec:
+          containers:
+              - name: nginx-container
+                image: nginx
+                containerPort: 8080
+    # strategy:
+    #     type: Recreate
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 1
+                    
+                  
