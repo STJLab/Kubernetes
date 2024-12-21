@@ -1328,3 +1328,518 @@ Deploy Additional Scheduler:
 		--config=/etc/kubernetes/config/kube-scheduler.yaml
 
 Create separate configuration file for each scheduler.
+
+
+Deploy Scheduler as a Pod:
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-custom-scheduler
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - kube-scheduler
+    - --address=127.0.0.1
+    - --kubeconfig=/etc/kubernetes/scheduler.conf
+    - --config=/etc/kubernetes/my-scheduler-config.yaml
+
+    image: k8s.gcr.io/kube-scheduler-amd64:v1.11.3
+    name: kube-scheduler
+	
+We can also specify leader elect option when we have multiple scheduler on different master node as high-availability setup, only one scheduler can be active at a time, so we can use leader elect option to decide who leads scheduling activity.
+
+Study how to deploy multiple scheduler using deployment option.
+
+Once you deploy scheduler, how to use it?
+Ans: Add schedulerName field in spec section of pod and specify name of the scheduler like -
+		schedulerName: my-custom-scheduler
+	 No need to specify scheduler namepsace.
+
+If scheduler not configured correctly then pod will be in pending state.
+
+
+How we know which scheduler picked it up by Pod as we have multiple scheduler?
+Ans: We can view this in the events:
+		# kubectl get events -o wide
+
+How to view the logs of scheduler?
+Ans: # kubectl logs my-custom-scheduler -n kube-system 
+        where my-custom-scheduler is a pod name or deployment name
+
+
+============================================================================================
+How sheduler deployes/ schedule pod on the node?
+Ans: 1) Scheduling Queue --> Pods are wait to be scheduled, and sorting happens based on pods with higher priority 
+	 2) Filtering --> Nodes that cannot have sufficient resources and cannot run the pods filters out
+	 3) Scoring --> Nodes are scored with different weights based on free space that will have after reserving the CPU required for that pod.
+     4) Binding --> Pod is binds to a node with highest score.
+
+ All above operations are achived with certain plaugins.
+ Like 	Scheduling Queue -- PrioritySort plugins (Sets the priority of the pod to be scheduled based on priority class)
+		Filtering -- NodeResourceFit (Check right node)
+		             NodeName (Check whether nodeName field is specified in the pod if yes it filters other nodes)
+					 NodeUnschedulable (Check whether nodeunschedulable field is set, this is when node is corden)
+		Scoring --  NodeResourceFit (How much space will free of node after pod is placed)
+					ImageLocality  (High Schore with node which already has container image)
+		Binding -- DefaultBinder
+		
+We can also customized what plugins go where using 'Extension Points'.
+       Scheduling Queue -- queueSort
+	   Filtering -- preFilter, filter, postFilter
+	   Scoring -- preScore, score, reserve
+	   Binding -- permit,  preBind, bind, postBind
+	   
+How we can change default behaviour of pluggins are called and how we can get our own plugins?
+Ans: 
+
+v1.18 -> We can set multiple profiles in same scheduler functionality introduced.		
+			Benefits of this we do not need to run separate binaries of multiple scheduler, instead multiple scheduler can share same binary.
+
+my-scheduler-2-config.yaml
+apiversion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+profiles:
+	- schedulerName: my-scheduler-2
+	- schedulerName: my-scheduler-3
+	- schedulerName: my-scheduler-4
+
+How to configure above different scheduler profiles work differently, because for now it works like default scheduler?
+Ans: Under each scheduler profile we can configure plugins which we want to.
+	my-scheduler-2-config.yaml
+	apiversion: kubescheduler.config.k8s.io/v1
+	kind: KubeSchedulerConfiguration
+	profiles:
+		- schedulerName: my-scheduler-2
+		  plugins:
+			score:
+				disabled:
+					- name: TaintToleration
+				enabled:
+					- name: MyCustomPluginA
+					- name: MyCustomPluginB
+		- schedulerName: my-scheduler-3
+		  plugins:
+			preScore:
+				disabled:
+					- name: '*'
+			score:
+				disabled:
+					- name: '*'
+		- schedulerName: my-scheduler-4
+
+============================================================================================
+
+MONITORING:
+
+What are things to monitor?
+Ans: How many nodes are healthy, node performance metrix such as CPU, Memory, Network, and Disk utilization. 
+	 Pod level matrix such as no. of pods and performance metrix of each pod such as CPU, Memory consumption.
+
+For now kubernetes does not comes with full-featured built-in monitoring solution. 
+	We can relie on open source solution such as -
+		Metrics Server, Prometheus, Elastic Stack
+	Proprietary solutions like -
+		Datadog and Dynatrace
+
+Metrics Server -> It is in memory monitoring solution and does not stores the metrics on disk. So we cannot see historical data.
+
+How kubernetes generates metrics?
+Ans: We know that kubelet present in each node. Kubelet contains the sub-component known as cAdvisor or Container Advisor.
+	cAdvisor is responsible for retriving performance metrics from pod and exposing them through the kubelete API to make metrics available for the Metrics Server.
+	
+
+Metrics Server:-
+How to deploy?
+Ans: For minikube: # minikube addons enable metrics-server
+	 For others: # kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+How to check metrics?
+Ans: # kubectl top node -> CPU and Memory consumption of each node 
+	 # kubectl top pod -> CPU and Memory consumption of each pod 
+
+============================================================================================
+
+LOGGING:
+
+Once the pod is running we can view the logs of pod using: 
+	# kubectl logs nginx-pod
+	# kubectl logs -f nginx-pod (Stream live logs)
+
+In case of multi-container, we must specify name of container in command.
+	# kubectl logs -f nginx-pod nginx-container 
+	
+============================================================================================
+
+Rollout and Versioning:
+When we first create a deployment it triggers a rollout. A new rollout creates a new deployment revision.
+In future when application is upgraded, a new rollout is triggered and new deployment revision is created.
+This help us to rollback to previous version when needed.
+
+How to check status of rollout?
+Ans: # kubectl rollout status deployment/myapp-deployment
+
+
+To see the revision and history of rollout :-
+# kubectl rollout history deployment/myapp-deployment 
+
+
+
+Types of Deployment Startegy:
+1) Recreate
+2) Rolling updates (Default strategy)
+	
+Recreate -> Destroy all pods and create new one
+Rolling Updates -> Take down older version and bring down newer version one by one. Hence application does not have downtime.
+                    
+
+When we update deployment property like updating image, labels and when we run kubectl apply command:-
+ New rollout is triggered and a new revision of the deployment is created 
+ 
+We can also use below command to update the image of the application :-
+# kubectl set image deployment/myapp-deployment nginx-container=nginx:1.9.1
+but in this way deployment file is not updated so be careful with that.
+
+
+To check deployment strategy is recreate or rolling update, you can use -
+	# kubectl describe deployment myapp-deployment 
+   and check StrategyType section.
+   Also check events here you can see if strategy is Recreate then scale down of replicaset to zero first.
+    and If strategy is RollingUpdate then old replicaset scale down one at a time, simultaneously scale up new replicaset one at a time.
+
+	
+When we create deployment it first creates the replicaset then pods under that. So when we do upgrades, first it creates new replicaset and then creates pod under that.
+You can check both replicaset using command: # kubectl get replicaset 
+When we rollback using -
+	# kuebctl rollout undo deployment/myapp-deployment 
+  deployment destroys the pod in the new replicaset and bring older ones up in old replica set.
+ 
+
+
+Sample code with Recreate startegy in deployment:
+
+spec:
+    strategy:
+        type: Recreate
+
+------------
+
+Sample code with Rolling Update startegy in deployment:
+
+spec:
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 1
+                    
+
+
+
+controlplane ~ ➜  cat curl-test.sh 
+for i in {1..35}; do
+   kubectl exec --namespace=kube-public curl -- sh -c 'test=`wget -qO- -T 2  http://webapp-service.default.svc.cluster.local:8080/info 2>&1` && echo "$test OK" || echo "Failed"';
+   echo ""
+done
+
+
+============================================================================================
+
+Commands and Argument:
+
+command filed in pod is same as ENTRYPOINT in dockerfile
+args in pod is same as CMD in dockerfile.
+
+============================================================================================
+
+Enviornment Variables:
+
+We can set environment varibles in pod in spec.containers.env property
+
+env:
+	- name: APP_COLOR
+	  value: red
+
+============================================================================================
+ConfigMap:
+
+When we have lots of pod-definition files it is difficult to manage env data directly in pod definition files.
+In such case we can create configmap with the value and pass configmap to the pod definition file.
+
+Config map is used to pass configuration data in the form of key-value pairs in kubernetes.
+
+We can create configmap using imperative way or declarative way.
+
+Imperative way:
+# kubectl create configmap <config-name> --from-literal=<key>=<value> --from-literal=<key>=<value>
+
+
+# kubectl create configmap <config-name> --from-file=<path-to-file>
+
+
+Declarative way:
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: app-config
+data:
+    APP_COLOR: blue
+    APP_MODE: prod
+
+
+
+View configmap:
+# kubectl get configmaps
+# kubectl describe configmaps
+
+Use config map in pod:
+1) In pod definition file: spec.containers.envFrom
+
+envFrom:
+- configMapRef:
+	name: app-config
+
+2) Single env variable:
+env:
+	- name: APP_COLOR
+	  valueFrom:
+		configMapKeyRef:
+			name: app-config
+			key: APP_COLOR
+			
+3) As a volume:
+volumes:
+- name: app-config-volume
+  configMap:
+	name: app-config
+
+============================================================================================
+
+Secrets:
+
+Why secrets required? 
+Ans: If I want to pass some sensitive data like password, defining variable value in pod definition file directly and configmap is not a good option as it stores values in plane text.
+      So here we can use Secrets. Secrets stores information in encoded format. 
+	  
+We can create secrets in imperative way and declarative way.
+
+Imperative:
+# kubectl create secret generic <secret-name> --from-literal=<key>=<value>
+# kubectl create secret generic <secret-name> --from-file=<path-to-file>
+
+# kubectl create secret generic app-secret --from-literal=DB_Host=mysql --from-literal=DB_User=root --from-literal=DB_Password=paswrd
+# kuebctl create secret generic app-secret --from-file=app_secret.properties
+
+When we run a imperative command, the secret values are automatically stored in base64 encoded format in secrets.
+
+
+Declarative:
+---
+apiVersion: v1
+kind: Secret
+metadata:
+    name: app-secret
+data:
+    DB_Host: mysql
+    DB_User: root
+    DB_Password: paswrd
+	
+But we have provided secret values in plain text which is not good way, so we must provide values in an encoded format.
+
+How to convert data from plain text to encoded format?
+Ans: Using base64
+     # echo -n 'mysql' | base64
+	 bXlzcWw=
+	 
+
+Type of secrets:
+A generic type secret indicate an Opaque secret type.
+A docker-registry type secret is for accessing a container registry.
+A tls type secret holds TLS certificate and its associated key.
+
+
+To get more information about secret we created run:
+	# kubectl describe secret app-secret 
+  It hides the value of secret.
+  
+To get the values of secret:
+	# kubectl get secret app-secret -o yaml
+   No we can see values as well, but it is in encoded format. 
+ 
+To decode values of secret:
+	# echo -n 'bXlzcWw=' | base64 --decode 
+
+How to use Secrets in pods?
+Ans: 
+Injecting secrets as env variable in a pod spec.containers.envFrom :
+	  envFrom:
+      - secretRef:
+          name: app-secret
+
+As a single env:
+      env:
+      - name: DB_Password
+        valueFrom:
+            SecretKeyRef:
+               name: app-secret
+               key: DB_Password
+
+As a volume:
+      volumes:
+      - name: app-secret-volume
+        secret:
+          secretName: app-secret			   
+
+When we inject secret as a volume in a pod, each attribute  in the secret is created as a file with the value of the secret as its content.
+	# ls /opt/app-secret-volume
+	 DB_Host   DB_Password   DB_User
+
+Note: Secrets are not Encrypted. Only encoded.
+      Secrets are not encrypted in ETCD (encryption at rest in not present by default).
+	  By default anyone able to create pods/deployments in the same namespace where secrets resides can access the secrets. So recommendation is configure least-privilege access to Secrets - RBAC
+	  Consider third-party secrets store providers like AWS, GCP, Azure, Vault provider
+
+Notes:
+
+Remember that secrets encode data in base64 format. Anyone with the base64 encoded secret can easily decode it. As such the secrets can be considered as not very safe.
+
+The concept of safety of the Secrets is a bit confusing in Kubernetes. The kubernetes documentation page and a lot of blogs out there refer to secrets as a "safer option" to store sensitive data. They are safer than storing in plain text as they reduce the risk of accidentally exposing passwords and other sensitive data. In my opinion it's not the secret itself that is safe, it is the practices around it. 
+
+Secrets are not encrypted, so it is not safer in that sense. However, some best practices around using secrets make it safer. As in best practices like:
+
+Not checking-in secret object definition files to source code repositories.
+
+Enabling Encryption at Rest for Secrets so they are stored encrypted in ETCD. 
+
+
+
+Also the way kubernetes handles secrets. Such as:
+
+A secret is only sent to a node if a pod on that node requires it.
+
+Kubelet stores the secret into a tmpfs so that the secret is not written to disk storage.
+
+Once the Pod that depends on the secret is deleted, kubelet will delete its local copy of the secret data as well.
+
+============================================================================================
+
+
+MULTI-CONTAINER POD:
+There can be requirement where two services needs to work together, such as web server and logging service.
+We need one web server instance with one log agent instance paired together and don't want to merge and load the code of the tool services together, but still want to work together.
+Also we want that those instances can scale up and down together. Here multi-container pods comes into picture.
+
+They share same lifecycle, same network space, they can access to same storage volumes.
+
+There are 3 common patterns, when it comes to designing multi-container PODs. The first and what we just saw with the logging service example is known as a side car pattern. The others are the adapter and the ambassador pattern.
+
+=============================================================================================
+
+InitContainers:
+In a multi-container pod, each container is expected to run a process that stays alive as long as the POD's lifecycle. For example in the multi-container pod that we talked about earlier that has a web application and logging agent, both the containers are expected to stay alive at all times. The process running in the log agent container is expected to stay alive as long as the web application is running. If any of them fails, the POD restarts.
+
+But at times you may want to run a process that runs to completion in a container. For example a process that pulls a code or binary from a repository that will be used by the main web application. That is a task that will be run only  one time when the pod is first created. Or a process that waits  for an external service or database to be up before the actual application starts. That's where initContainers comes in.
+
+An initContainer is configured in a pod like all other containers, except that it is specified inside a initContainers section,  like this:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: init-myservice
+    image: busybox
+    command: ['sh', '-c', 'git clone <some-repository-that-will-be-used-by-application> ; done;']
+
+	
+When a POD is first created the initContainer is run, and the process in the initContainer must run to a completion before the real container hosting the application starts. 
+
+You can configure multiple such initContainers as well, like how we did for multi-containers pod. In that case each init container is run one at a time in sequential order.
+
+If any of the initContainers fail to complete, Kubernetes restarts the Pod repeatedly until the Init Container succeeds.
+
+In pod get command: # kubectl get pod  :when you see Status 'Init:CrashLoopBackOff' it means init container is failing.
+
+=============================================================================================================================
+SELF HEALING APPLICATIONS
+
+Kubernetes supports self-healing applications through ReplicaSets and Replication Controllers. The replication controller helps in ensuring that a POD is re-created automatically when the application within the POD crashes. It helps in ensuring enough replicas of the application are running at all times.
+
+Kubernetes provides additional support to check the health of applications running within PODs and take necessary actions through Liveness and Readiness Probes.
+=============================================================================================================================
+
+CLUSTER MAINTENANCE:
+
+
+When nodes go down, pods on them are inaccessible.
+If node came back immediately, a kubelet process starts anbd the pod come back online.
+If node was down for more than 5min, the pods are terminated from that node.
+If pods are part of replicaset then they are recreated on other nodes, and if pods are standalone then it dead.
+The time it waits for pod to come back online is known as pod-eviction-timeout. It sets on controller manager: kube-controller-manager --pod-eviction-timeout=5m0s
+When node comes online after pod-eviction-timeout, it comes up blank without any pod scheduled on it.
+
+How to perform OS upgarde on node?
+Ans:
+We can purposefuly drain the node of all workload, so that workloads are moved to other nodes in the cluster.
+	# kubectl drain node-1
+When we drain the node, pods are gracefully terminated and recreated on other node.
+The node is also cordoned or marked as unschedulable automatically when we drain the node. Meaning no pods can be schedule on this node until we specifically removes restriction.
+Now perform os patching - 
+	# yum update -y
+	# reboot
+When nodes comes back online it is still unschedulable, so we need to uncordon it so that pods can be schedule.
+    # kubectl uncordon node-1
+
+Note that the pods which are moved on other nodes dont automatically fall back. If any of these pods are deleted or if new pods were created on cluster they can be schedule on this node.
+
+
+There is one more command:
+	# kubectl cordon node-2
+ It marks node unschedulable, so new pods not deploy on this node. 
+ Unlike drain it does not terminate or moves the pod different node.
+
+
+When we cordon node and check # kubectl describe node worker1
+You can see Unschedulable filed is set to true.
+Also in #kubectl get nodes command, in Status field it is showing 'SchedulingDisabled'.	
+
+If we try to drain node and pod is present which is not part of replicaset we will get an error:
+	'cannot delete cannot delete Pods that declare no controller (use --force to override)'
+ now to drain it run command:
+	# kubectl drain worker --ignore-daemonsets --force 
+	
+=============================================================================================================================
+
+KUBERNETES VERSION:
+
+v1.11.3:
+v1 -> Major Version 
+11 -> Minor Version  (Released every few months with new features and functionality)
+3  -> Patch Version  (Released more often with critical bug fixes)
+
+There are other relases called alpha and beta.
+All bug fixes and improvements first go into an alpha release. eg: v1.11.4-alpha In this release the features are disabled by default and may be buggy.
+Code is well tested in beta release. eg: v1.11.4-beta. New features are enabled by default.
+After beta they merged into main stable version. Eg: v1.11.4
+
+When we download package and extract of new version, it will has most of the component of same version except etcd, coreDNS, etc. as they are separate projects.
+Eg: Package - v1.13.4 
+      kube-apiserver - v1.13.4
+	  controller-manager - v1.13.4
+	  kubelet - v1.13.4
+	  kube-scheduler - v1.13.4
+	  kube-proxy - v1.13.4
+	  kubectl - v1.13.4
+	  ETCD Cluster - v3.2.18
+	  CoreDNS: v1.1.3
+
