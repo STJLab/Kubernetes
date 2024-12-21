@@ -83,3 +83,24 @@ kuebctl rollout undo deployment/myapp-deployment
 kubectl set image deployment/myapp-deployment nginx-container=nginx:1.9.1
 kubectl run webapp-green --image=kodecloud/webapp-green -- --color=green
 kubectl run webapp-green --image=kodecloud/webapp-green --command -- python app2.py --color=green
+kubectl create configmap app-config --from-literal=APP_COLOR=blue --from-literal=APP_MOD=prod
+kubectl create configmap app-config --from-file=app_config.properties
+kubectl get configmaps
+kubectl describe configmap webapp-config
+echo -n 'mysql' | base64
+kubectl create secret generic app-secret --from-literal=DB_Host=mysql --from-literal=DB_User=root --from-literal=DB_Password=paswrd
+kuebctl create secret generic app-secret --from-file=app_secret.properties
+kubectl get secret
+kubectl describe secret app-secret
+kubectl get secret app-secret -o yaml
+echo -n 'bXlzcWw=' | base64 --decode 
+ETCDCTL_API=3 etcdctl    --cacert=/etc/kubernetes/pki/etcd/ca.crt      --cert=/etc/kubernetes/pki/etcd/server.crt    --key=/etc/kubernetes/pki/etcd/server.key     get /registry/secrets/default/app-secret | hexdump -C
+kubectl -n elastic-stack exec app -- cat /log/app.log
+kubectl logs orange -c init-myservice
+kubectl describe node worker1
+kubectl get nodes
+kubectl drain worker --ignore-daemonsets --force
+kubectl cordon worker1
+kubectl config view 
+kubectl config view | grep namespace
+
